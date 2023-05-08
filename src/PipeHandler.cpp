@@ -58,7 +58,6 @@ bool _receiveData(HANDLE pipe, std::string& data)
 
 	if (nbData > 0)
 	{
-		std::string data;
 		data.resize(nbData);
 
 		fSuccess = ReadFile(pipe, (void*)data.data(), nbData, &cbRead, NULL);
@@ -78,8 +77,6 @@ Server::Server(std::string& pipeName)
 {
 	m_pipeName="\\\\.\\pipe\\";
 	m_pipeName+=pipeName;
-
-	m_isInit = init();
 }
 
 
@@ -111,6 +108,7 @@ bool Server::init()
 		bool fConnected = ConnectNamedPipe(m_pipe, NULL);
 		if (fConnected)
 		{
+			m_isInit=true;
 			break;
 		}
 	}

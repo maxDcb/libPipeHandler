@@ -10,6 +10,7 @@ int main()
 { 
     std::string pipeName = "mynamedpipe";
     Server* server = new Server(pipeName);
+    server->init();
 
     while(1)
     {
@@ -17,9 +18,6 @@ int main()
         server->receiveData(ret);
 
         string out = "ManManManManManManManManManManMan";
-        for (int i = 0; i < 1500; i++)
-            out.append("a");
-
         server->sendData(out);
     }
 

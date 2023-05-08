@@ -17,13 +17,14 @@ public:
 	Server(std::string& pipeName);
 	~Server();
 
+	bool init();
 	bool reset();
 
 	bool sendData(std::string& data);
 	bool receiveData(std::string& data);
 
 private:
-	bool init();
+	
 	bool m_isInit;
 
 	std::string m_pipeName;
