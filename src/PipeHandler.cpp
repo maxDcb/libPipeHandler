@@ -45,16 +45,16 @@ bool _receiveData(HANDLE pipe, std::string& data)
 	DWORD  cbRead;
 	int nbData = -1;
 
-	std::cout << "ReadFile nbData 1" << std::endl;
+	// std::cout << "ReadFile nbData 1" << std::endl;
 
 	BOOL fSuccess = ReadFile(pipe, &nbData, sizeof(int), &cbRead, NULL);
 	if (!fSuccess)
 	{
-		_tprintf(TEXT("ReadFile failed, GLE=%d.\n"), GetLastError());
+		// _tprintf(TEXT("ReadFile failed, GLE=%d.\n"), GetLastError());
 		return false;
 	}
 
-	std::cout << "ReadFile nbData " << std::to_string(nbData) << std::endl;
+	// std::cout << "ReadFile nbData " << std::to_string(nbData) << std::endl;
 
 	if (nbData > 0)
 	{
@@ -63,12 +63,14 @@ bool _receiveData(HANDLE pipe, std::string& data)
 		fSuccess = ReadFile(pipe, (void*)data.data(), nbData, &cbRead, NULL);
 		if (!fSuccess)
 		{
-			_tprintf(TEXT("ReadFile failed, GLE=%d.\n"), GetLastError());
+			// _tprintf(TEXT("ReadFile failed, GLE=%d.\n"), GetLastError());
 			return false;
 		}
 
-		std::cout << "ReadFile nbData " << std::to_string(nbData) << " nbDataRead " << std::to_string(cbRead) << std::endl;
+		// std::cout << "ReadFile nbData " << std::to_string(nbData) << " nbDataRead " << std::to_string(cbRead) << std::endl;
 	}
+
+	return true;
 }
 
 
