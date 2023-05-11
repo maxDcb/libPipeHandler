@@ -82,6 +82,7 @@ Server::Server(std::string& pipeName)
 
 Server::~Server()
 {
+	CloseHandle(m_pipe);
 }
 
 
@@ -94,12 +95,14 @@ bool Server::reset()
 }
 
 
-bool Server::init()
+bool Server::initServer()
 {
+	reset();
+
 	m_pipe = CreateNamedPipe( m_pipeName.c_str(), PIPE_ACCESS_DUPLEX, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE, PIPE_UNLIMITED_INSTANCES, 512, 512, 0, NULL);
 	if (m_pipe == INVALID_HANDLE_VALUE) 
 	{
-		_tprintf(TEXT("CreateNamedPipe failed, GLE=%d.\n"), GetLastError()); 
+		// _tprintf(TEXT("CreateNamedPipe failed, GLE=%d.\n"), GetLastError()); 
 		return false;
 	}
 
@@ -111,6 +114,7 @@ bool Server::init()
 			m_isInit=true;
 			break;
 		}
+		Sleep(100);
 	}
 
 	return true;
@@ -136,7 +140,7 @@ bool Server::sendData(std::string& data)
 bool Server::receiveData(std::string& data)
 {
 	if (!m_isInit)
-		m_isInit = init();
+		return false;
 
 	bool res = _receiveData(m_pipe, data);
 	if (!res)
@@ -154,53 +158,45 @@ Client::Client(std::string& pipeName)
 {
 	m_pipeName="\\\\.\\pipe\\";
 	m_pipeName+=pipeName;
-
-	m_isInit = init();
 }
 
 
 Client::~Client()
 {
+	DisconnectNamedPipe(m_pipe);
 	CloseHandle(m_pipe);
 }
 
 
-bool Client::init()
+bool Client::initConnection()
 {
-	while (1)
+	reset();
+	m_pipe = CreateFile(m_pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	if (m_pipe == INVALID_HANDLE_VALUE) 
 	{
-		m_pipe = CreateFile(m_pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-		if (m_pipe == INVALID_HANDLE_VALUE) 
-		{
-			_tprintf( TEXT("Could not open pipe. GLE=%d\n"), GetLastError() ); 
-			return false;
-		}
-
-		if (m_pipe != INVALID_HANDLE_VALUE)
-			break;
-
-		// Exit if an error other than ERROR_PIPE_BUSY occurs. 
-		if (GetLastError() != ERROR_PIPE_BUSY)
-		{
-			_tprintf(TEXT("Could not open pipe. GLE=%d\n"), GetLastError());
-			return -1;
-		}
-
-		// All pipe instances are busy, so wait for 20 seconds. 
-		if (!WaitNamedPipe(m_pipeName.c_str(), 2000))
-		{
-			printf("Could not open pipe: 2 second wait timed out.");
-			return -1;
-		}
+		// _tprintf( TEXT("Could not open pipe. GLE=%d\n"), GetLastError() ); 
+		return false;
 	}
 
 	DWORD dwMode = PIPE_READMODE_MESSAGE;
 	BOOL fSuccess = SetNamedPipeHandleState(m_pipe, &dwMode, NULL, NULL);
 	if (!fSuccess)
 	{
-		_tprintf(TEXT("SetNamedPipeHandleState failed, GLE=%d.\n"), GetLastError());
+		// _tprintf(TEXT("SetNamedPipeHandleState failed, GLE=%d.\n"), GetLastError());
 		return false;
 	}
+
+	m_isInit = true;
+
+	return true;
+}
+
+
+bool Client::closeConnection()
+{
+	m_isInit = false;
+	DisconnectNamedPipe(m_pipe);
+	CloseHandle(m_pipe);
 
 	return true;
 }
@@ -209,6 +205,7 @@ bool Client::init()
 bool Client::reset()
 {
 	m_isInit = false;
+	DisconnectNamedPipe(m_pipe);
 	CloseHandle(m_pipe);
 	
 	return true;
@@ -218,19 +215,14 @@ bool Client::reset()
 bool Client::sendData(std::string& data)
 { 
 	if(!m_isInit)
-		m_isInit = init();;
-
-	if (m_isInit)
-	{
-		bool res = _sendData(m_pipe, data);
-		if (!res)
-		{
-			reset();
-			return false;
-		}
-	}
-	else
 		return false;
+
+	bool res = _sendData(m_pipe, data);
+	if (!res)
+	{
+		reset();
+		return false;
+	}
 
 	return true;
 }
@@ -238,17 +230,15 @@ bool Client::sendData(std::string& data)
 
 bool Client::receiveData(std::string& data)
 {
-	if(m_isInit)
-	{
-		bool res = _receiveData(m_pipe, data);
-		if (!res)
-		{
-			reset();
-			return false;
-		}
-	}
-	else
+	if(!m_isInit)
 		return false;
+
+	bool res = _receiveData(m_pipe, data);
+	if (!res)
+	{
+		reset();
+		return false;
+	}
 
 	return true;
 }

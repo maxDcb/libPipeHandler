@@ -11,17 +11,39 @@ int main()
     std::string pipeName = "mynamedpipe";
     Client* client=new Client(pipeName);
 
-    Sleep(2000);
-
     while(1)
     {
-        string out="HelloHelloHelloHelloHelloHelloHelloHelloHello";
-        client->sendData(out);
+        std::cout << "InitConnection" << std::endl;
 
-        string ret;
-        client->receiveData(ret);
+        while(!client->initConnection())
+        {
+            Sleep(333);
+        }
+        std::cout << "Sending" << std::endl;
 
-        std::cout << "Client - " << ret << std::endl;
+        string out="Hello";
+        bool res = client->sendData(out);
+        if(res)
+        {
+            std::cout << "Sent" << std::endl;
+            std::cout << "Receiving" << std::endl;
+
+            string ret;
+            res = client->receiveData(ret);
+
+            if(res)
+            {
+                std::cout << "Received" << std::endl;
+
+                std::cout << "Client - " << ret << std::endl;
+            }
+            else
+                std::cout << "Receive failed" << std::endl;
+        }
+        else
+            std::cout << "Send failed" << std::endl;
+
+        client->closeConnection();
 
         Sleep(1000);    
     }
