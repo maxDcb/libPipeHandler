@@ -18,12 +18,12 @@ bool _sendData(HANDLE pipe, std::string& data)
 
 	int nbData = data.size();
 
-	std::cout << "WriteFile nbData " << std::to_string(nbData) << std::endl;
+	// std::cout << "WriteFile nbData " << std::to_string(nbData) << std::endl;
 
 	fSuccess = WriteFile(pipe, &nbData, sizeof(int), &cbWritten, NULL);
 	if (!fSuccess || sizeof(int) != cbWritten)
 	{   
-		_tprintf(TEXT("SendData failed, GLE=%d.\n"), GetLastError()); 
+		// _tprintf(TEXT("SendData failed, GLE=%d.\n"), GetLastError()); 
 		return false;
 	}
 
@@ -34,7 +34,7 @@ bool _sendData(HANDLE pipe, std::string& data)
 		return false;
 	}
 
-	std::cout << "WriteFile cbWritten " << std::to_string(cbWritten) << " cbWritten " << std::to_string(cbWritten) << std::endl;
+	// std::cout << "WriteFile cbWritten " << std::to_string(cbWritten) << " cbWritten " << std::to_string(cbWritten) << std::endl;
 
 	return true;
 }
@@ -44,6 +44,14 @@ bool _receiveData(HANDLE pipe, std::string& data)
 {
 	DWORD  cbRead;
 	int nbData = -1;
+
+	DWORD bytesAvail = 0;
+	BOOL isOK = PeekNamedPipe(pipe, NULL, 0, NULL, &bytesAvail, NULL);
+	if(!isOK || bytesAvail==0)
+	{
+		// _tprintf(TEXT("PeekNamedPipe, bytesAvail=%d.\n"), bytesAvail);
+		return true;
+	}
 
 	// std::cout << "ReadFile nbData 1" << std::endl;
 
