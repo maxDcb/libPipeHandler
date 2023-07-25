@@ -83,7 +83,7 @@ bool _receiveData(HANDLE pipe, std::string& data)
 
 
 // https://learn.microsoft.com/en-us/windows/win32/ipc/multithreaded-pipe-server
-Server::Server(std::string& pipeName)
+Server::Server(const std::string& pipeName)
 {
 	m_pipeName="\\\\.\\pipe\\";
 	m_pipeName+=pipeName;
@@ -164,7 +164,7 @@ bool Server::receiveData(std::string& data)
 
 
 // https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-client
-Client::Client(std::string& pipeName)
+Client::Client(const std::string& pipeName)
 {
 	m_pipeName="\\\\.\\pipe\\";
 	m_pipeName+=pipeName;

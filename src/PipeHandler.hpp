@@ -14,7 +14,7 @@ namespace PipeHandler
 class Server
 {
 public:
-	Server(std::string& pipeName);
+	Server(const std::string& pipeName);
 	~Server();
 
 	bool initServer();
@@ -36,7 +36,7 @@ private:
 class Client
 {
 public:
-	Client(std::string& pipeName);
+	Client(const std::string& pipeName);
 	~Client();
 
 	bool initConnection();
