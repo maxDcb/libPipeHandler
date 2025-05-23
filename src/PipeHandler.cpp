@@ -164,9 +164,11 @@ bool Server::receiveData(std::string& data)
 
 
 // https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-client
-Client::Client(const std::string& pipeName)
+Client::Client(const std::string& ip, const std::string& pipeName)
 {
-	m_pipeName="\\\\.\\pipe\\";
+	m_pipeName="\\\\";
+	m_pipeName+=ip;
+	m_pipeName+="\\pipe\\";
 	m_pipeName+=pipeName;
 }
 
@@ -184,7 +186,7 @@ bool Client::initConnection()
 	m_pipe = CreateFile(m_pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (m_pipe == INVALID_HANDLE_VALUE) 
 	{
-		// _tprintf( TEXT("Could not open pipe. GLE=%d\n"), GetLastError() ); 
+		_tprintf( TEXT("Could not open pipe. GLE=%d\n"), GetLastError() ); 
 		return false;
 	}
 
@@ -192,7 +194,7 @@ bool Client::initConnection()
 	BOOL fSuccess = SetNamedPipeHandleState(m_pipe, &dwMode, NULL, NULL);
 	if (!fSuccess)
 	{
-		// _tprintf(TEXT("SetNamedPipeHandleState failed, GLE=%d.\n"), GetLastError());
+		_tprintf(TEXT("SetNamedPipeHandleState failed, GLE=%d.\n"), GetLastError());
 		return false;
 	}
 

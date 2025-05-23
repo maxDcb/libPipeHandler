@@ -8,8 +8,9 @@ using namespace PipeHandler;
 
 int main()
 {
+    std::string ip = "127.0.0.1";
     std::string pipeName = "mynamedpipe";
-    Client* client=new Client(pipeName);
+    Client* client=new Client(ip, pipeName);
 
     while(1)
     {
