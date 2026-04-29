@@ -12,3 +12,5 @@ if(WIN32)
 	target_link_libraries(PipeHandlerServerTest PipeHandler)
 else()
 endif()
+
+# Manual harnesses: client/server are infinite loops and must be orchestrated together.
