@@ -17,18 +17,24 @@ public:
 	Server(const std::string& pipeName);
 	~Server();
 
+	bool openServer();
+	bool acceptConnection();
+	void stop();
 	bool initServer();
 
 	bool sendData(std::string& data);
 	bool receiveData(std::string& data);
+	void waitForClientClose();
 
 private:
 	bool reset();
 	
-	bool m_isInit;
+	bool m_isInit = false;
+	bool m_hasOpened = false;
 
 	std::string m_pipeName;
-	HANDLE m_pipe;
+	HANDLE m_pipe = INVALID_HANDLE_VALUE;
+	HANDLE m_stopEvent = nullptr;
 };
 
 
@@ -48,10 +54,10 @@ public:
 private:
 	bool reset();
 	
-	bool m_isInit;
+	bool m_isInit = false;
 
 	std::string m_pipeName;
-	HANDLE m_pipe;
+	HANDLE m_pipe = INVALID_HANDLE_VALUE;
 };
 
 }

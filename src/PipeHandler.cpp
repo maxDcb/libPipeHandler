@@ -1,258 +1,263 @@
 #include "PipeHandler.hpp"
 
-#include <windows.h> 
-#include <stdio.h>
-#include <conio.h>
-#include <tchar.h>
+#include <cstdint>
 
-#pragma comment(lib, "ws2_32.lib")
-
-
-using namespace PipeHandler;
-
-
-bool _sendData(HANDLE pipe, std::string& data)
+namespace
 {
-	BOOL fSuccess = false;
-	DWORD cbWritten = 0; 
+constexpr DWORD IoTimeoutMs = 30000;
+constexpr std::int32_t MaxMessageBytes = 64 * 1024 * 1024;
 
-	int nbData = data.size();
-
-	// std::cout << "WriteFile nbData " << std::to_string(nbData) << std::endl;
-
-	fSuccess = WriteFile(pipe, &nbData, sizeof(int), &cbWritten, NULL);
-	if (!fSuccess || sizeof(int) != cbWritten)
-	{   
-		// _tprintf(TEXT("SendData failed, GLE=%d.\n"), GetLastError()); 
-		return false;
-	}
-
-	fSuccess = WriteFile(pipe, &data[0], nbData, &cbWritten, NULL);
-	if (!fSuccess || cbWritten!= nbData)
-	{   
-		_tprintf(TEXT("SendData failed, GLE=%d.\n"), GetLastError()); 
-		return false;
-	}
-
-	// std::cout << "WriteFile cbWritten " << std::to_string(cbWritten) << " cbWritten " << std::to_string(cbWritten) << std::endl;
-
-	return true;
+bool completeIo(HANDLE pipe, OVERLAPPED& operation, HANDLE stopEvent, DWORD& transferred,
+                DWORD timeoutMs = IoTimeoutMs)
+{
+    HANDLE events[] = {operation.hEvent, stopEvent};
+    const DWORD result = WaitForMultipleObjects(stopEvent ? 2 : 1, events, FALSE, timeoutMs);
+    if (result != WAIT_OBJECT_0)
+    {
+        CancelIoEx(pipe, &operation);
+        WaitForSingleObject(operation.hEvent, INFINITE);
+        return false;
+    }
+    return GetOverlappedResult(pipe, &operation, &transferred, FALSE) != FALSE;
 }
 
-
-bool _receiveData(HANDLE pipe, std::string& data)
+bool transfer(HANDLE pipe, bool write, void* buffer, DWORD length, HANDLE stopEvent,
+              DWORD timeoutMs = IoTimeoutMs)
 {
-	DWORD  cbRead;
-	int nbData = -1;
+    OVERLAPPED operation = {};
+    operation.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    if (!operation.hEvent)
+        return false;
 
-	DWORD bytesAvail = 0;
-	BOOL isOK = PeekNamedPipe(pipe, NULL, 0, NULL, &bytesAvail, NULL);
-	if(!isOK || bytesAvail==0)
-	{
-		// _tprintf(TEXT("PeekNamedPipe, bytesAvail=%d.\n"), bytesAvail);
-		return true;
-	}
+    DWORD transferred = 0;
+    const BOOL immediate = write
+        ? WriteFile(pipe, buffer, length, nullptr, &operation)
+        : ReadFile(pipe, buffer, length, nullptr, &operation);
+    bool success = false;
+    if (immediate)
+        success = GetOverlappedResult(pipe, &operation, &transferred, FALSE) != FALSE;
+    else if (GetLastError() == ERROR_IO_PENDING)
+        success = completeIo(pipe, operation, stopEvent, transferred, timeoutMs);
 
-	// std::cout << "ReadFile nbData 1" << std::endl;
-
-	BOOL fSuccess = ReadFile(pipe, &nbData, sizeof(int), &cbRead, NULL);
-	if (!fSuccess)
-	{
-		// _tprintf(TEXT("ReadFile failed, GLE=%d.\n"), GetLastError());
-		return false;
-	}
-
-	// std::cout << "ReadFile nbData " << std::to_string(nbData) << std::endl;
-
-	if (nbData > 0)
-	{
-		data.resize(nbData);
-
-		fSuccess = ReadFile(pipe, (void*)data.data(), nbData, &cbRead, NULL);
-		if (!fSuccess)
-		{
-			// _tprintf(TEXT("ReadFile failed, GLE=%d.\n"), GetLastError());
-			return false;
-		}
-
-		// std::cout << "ReadFile nbData " << std::to_string(nbData) << " nbDataRead " << std::to_string(cbRead) << std::endl;
-	}
-
-	return true;
+    CloseHandle(operation.hEvent);
+    return success && transferred == length;
 }
 
+bool sendData(HANDLE pipe, const std::string& data, HANDLE stopEvent)
+{
+    if (data.size() > static_cast<size_t>(MaxMessageBytes))
+        return false;
 
-// https://learn.microsoft.com/en-us/windows/win32/ipc/multithreaded-pipe-server
+    std::int32_t size = static_cast<std::int32_t>(data.size());
+    if (!transfer(pipe, true, &size, sizeof(size), stopEvent))
+        return false;
+    return size == 0 || transfer(pipe, true, const_cast<char*>(data.data()), size, stopEvent);
+}
+
+bool receiveData(HANDLE pipe, std::string& data, HANDLE stopEvent)
+{
+    data.clear();
+    std::int32_t size = 0;
+    if (!transfer(pipe, false, &size, sizeof(size), stopEvent) ||
+        size < 0 || size > MaxMessageBytes)
+        return false;
+
+    if (size == 0)
+        return true;
+    data.resize(size);
+    if (!transfer(pipe, false, &data[0], size, stopEvent))
+    {
+        data.clear();
+        return false;
+    }
+    return true;
+}
+}
+
+namespace PipeHandler
+{
 Server::Server(const std::string& pipeName)
+    : m_pipeName("\\\\.\\pipe\\" + pipeName),
+      m_stopEvent(CreateEvent(nullptr, TRUE, FALSE, nullptr))
 {
-	m_pipeName="\\\\.\\pipe\\";
-	m_pipeName+=pipeName;
 }
-
 
 Server::~Server()
 {
-	CloseHandle(m_pipe);
+    stop();
+    reset();
+    if (m_stopEvent)
+        CloseHandle(m_stopEvent);
 }
-
 
 bool Server::reset()
 {
-	m_isInit = false;
-	CloseHandle(m_pipe);
-
-	return true;
+    if (m_pipe != INVALID_HANDLE_VALUE)
+    {
+        if (m_isInit)
+            DisconnectNamedPipe(m_pipe);
+        CloseHandle(m_pipe);
+        m_pipe = INVALID_HANDLE_VALUE;
+    }
+    m_isInit = false;
+    return true;
 }
 
+void Server::stop()
+{
+    if (m_stopEvent)
+        SetEvent(m_stopEvent);
+}
+
+bool Server::openServer()
+{
+    reset();
+    if (!m_stopEvent || WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0)
+        return false;
+    const DWORD access = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
+        (m_hasOpened ? 0 : FILE_FLAG_FIRST_PIPE_INSTANCE);
+    m_pipe = CreateNamedPipeA(m_pipeName.c_str(), access,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        PIPE_UNLIMITED_INSTANCES, 512, 512, 0, nullptr);
+    if (m_pipe != INVALID_HANDLE_VALUE)
+        m_hasOpened = true;
+    return m_pipe != INVALID_HANDLE_VALUE;
+}
+
+bool Server::acceptConnection()
+{
+    if (m_pipe == INVALID_HANDLE_VALUE)
+        return false;
+
+    OVERLAPPED operation = {};
+    operation.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    if (!operation.hEvent)
+        return false;
+    const BOOL immediate = ConnectNamedPipe(m_pipe, &operation);
+    bool connected = immediate != FALSE;
+    if (!connected)
+    {
+        const DWORD error = GetLastError();
+        if (error == ERROR_PIPE_CONNECTED)
+            connected = true;
+        else if (error == ERROR_IO_PENDING)
+        {
+            HANDLE events[] = {operation.hEvent, m_stopEvent};
+            const DWORD result = WaitForMultipleObjects(2, events, FALSE, INFINITE);
+            if (result == WAIT_OBJECT_0)
+            {
+                DWORD transferred = 0;
+                connected = GetOverlappedResult(m_pipe, &operation, &transferred, FALSE) != FALSE;
+            }
+            else
+            {
+                CancelIoEx(m_pipe, &operation);
+                WaitForSingleObject(operation.hEvent, INFINITE);
+            }
+        }
+    }
+    CloseHandle(operation.hEvent);
+    m_isInit = connected && WaitForSingleObject(m_stopEvent, 0) != WAIT_OBJECT_0;
+    return m_isInit;
+}
 
 bool Server::initServer()
 {
-	reset();
-
-	m_pipe = CreateNamedPipe( m_pipeName.c_str(), PIPE_ACCESS_DUPLEX, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE, PIPE_UNLIMITED_INSTANCES, 512, 512, 0, NULL);
-	if (m_pipe == INVALID_HANDLE_VALUE) 
-	{
-		// _tprintf(TEXT("CreateNamedPipe failed, GLE=%d.\n"), GetLastError()); 
-		return false;
-	}
-
-	while (1)
-	{
-		bool fConnected = ConnectNamedPipe(m_pipe, NULL);
-		if (fConnected)
-		{
-			m_isInit=true;
-			break;
-		}
-		Sleep(100);
-	}
-
-	return true;
+    return openServer() && acceptConnection();
 }
-
 
 bool Server::sendData(std::string& data)
 {
-	if (!m_isInit)
-		return false;
-
-	bool res = _sendData(m_pipe, data);
-	if (!res)
-	{
-		reset();
-		return false;
-	}
-
-	return true;
+    if (!m_isInit || !::sendData(m_pipe, data, m_stopEvent))
+    {
+        reset();
+        return false;
+    }
+    return true;
 }
-
 
 bool Server::receiveData(std::string& data)
 {
-	if (!m_isInit)
-		return false;
-
-	bool res = _receiveData(m_pipe, data);
-	if (!res)
-	{
-		reset();
-		return false;
-	}
-
-	return true;
+    if (!m_isInit || !::receiveData(m_pipe, data, m_stopEvent))
+    {
+        reset();
+        return false;
+    }
+    return true;
 }
 
-
-// https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-client
-Client::Client(const std::string& ip, const std::string& pipeName)
+void Server::waitForClientClose()
 {
-	m_pipeName="\\\\";
-	m_pipeName+=ip;
-	m_pipeName+="\\pipe\\";
-	m_pipeName+=pipeName;
+    if (m_isInit)
+    {
+        char ignored = 0;
+        // Each exchange uses one connection. Keep the response available until
+        // the client has read it and closed its handle, with a bounded wait.
+        transfer(m_pipe, false, &ignored, 1, m_stopEvent, 5000);
+    }
 }
 
+Client::Client(const std::string& ip, const std::string& pipeName)
+    : m_pipeName("\\\\" + ip + "\\pipe\\" + pipeName)
+{
+}
 
 Client::~Client()
 {
-	DisconnectNamedPipe(m_pipe);
-	CloseHandle(m_pipe);
+    reset();
 }
-
-
-bool Client::initConnection()
-{
-	reset();
-	m_pipe = CreateFile(m_pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-	if (m_pipe == INVALID_HANDLE_VALUE) 
-	{
-		_tprintf( TEXT("Could not open pipe. GLE=%d\n"), GetLastError() ); 
-		return false;
-	}
-
-	DWORD dwMode = PIPE_READMODE_MESSAGE;
-	BOOL fSuccess = SetNamedPipeHandleState(m_pipe, &dwMode, NULL, NULL);
-	if (!fSuccess)
-	{
-		_tprintf(TEXT("SetNamedPipeHandleState failed, GLE=%d.\n"), GetLastError());
-		return false;
-	}
-
-	m_isInit = true;
-
-	return true;
-}
-
-
-bool Client::closeConnection()
-{
-	m_isInit = false;
-	DisconnectNamedPipe(m_pipe);
-	CloseHandle(m_pipe);
-
-	return true;
-}
-
 
 bool Client::reset()
 {
-	m_isInit = false;
-	DisconnectNamedPipe(m_pipe);
-	CloseHandle(m_pipe);
-	
-	return true;
+    m_isInit = false;
+    if (m_pipe != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(m_pipe);
+        m_pipe = INVALID_HANDLE_VALUE;
+    }
+    return true;
 }
 
+bool Client::initConnection()
+{
+    reset();
+    m_pipe = CreateFileA(m_pipeName.c_str(), GENERIC_READ | GENERIC_WRITE,
+        0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+    if (m_pipe == INVALID_HANDLE_VALUE)
+        return false;
+
+    DWORD mode = PIPE_READMODE_MESSAGE;
+    if (!SetNamedPipeHandleState(m_pipe, &mode, nullptr, nullptr))
+    {
+        reset();
+        return false;
+    }
+    m_isInit = true;
+    return true;
+}
+
+bool Client::closeConnection()
+{
+    return reset();
+}
 
 bool Client::sendData(std::string& data)
-{ 
-	if(!m_isInit)
-		return false;
-
-	bool res = _sendData(m_pipe, data);
-	if (!res)
-	{
-		reset();
-		return false;
-	}
-
-	return true;
+{
+    if (!m_isInit || !::sendData(m_pipe, data, nullptr))
+    {
+        reset();
+        return false;
+    }
+    return true;
 }
-
 
 bool Client::receiveData(std::string& data)
 {
-	if(!m_isInit)
-		return false;
-
-	bool res = _receiveData(m_pipe, data);
-	if (!res)
-	{
-		reset();
-		return false;
-	}
-
-	return true;
+    if (!m_isInit || !::receiveData(m_pipe, data, nullptr))
+    {
+        reset();
+        return false;
+    }
+    return true;
 }
-
-
+}
